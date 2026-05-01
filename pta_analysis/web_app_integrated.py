@@ -209,6 +209,37 @@ def api_option_vol_cone():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/options/export_excel')
+def api_export_option_excel():
+    """导出平值±10档期权数据 Excel，直接下载"""
+    try:
+        result = oca.export_atm_option_excel()
+        if result.get('success'):
+            from flask import send_from_directory
+            filepath = result['filepath']
+            filename = result['filename']
+            return send_from_directory(
+                os.path.dirname(filepath),
+                filename,
+                as_attachment=True,
+                download_name=filename
+            )
+        else:
+            return jsonify({'success': False, 'error': result.get('error')})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/download/option_excel/<filename>')
+def download_option_excel(filename):
+    """下载期权Excel文件"""
+    from flask import send_from_directory
+    output_dir = os.path.expanduser("~/.hermes/option_exports")
+    # 安全检查：只允许字母数字下划线和短横线
+    import re
+    if not re.match(r'^[\w-]+\.xlsx$', filename):
+        return "Invalid filename", 400
+    return send_from_directory(output_dir, filename, as_attachment=True)
+
 @app.route('/api/fundamental')
 def api_fundamental():
     """PTA基本面数据API"""

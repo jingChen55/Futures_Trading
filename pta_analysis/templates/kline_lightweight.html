@@ -2758,6 +2758,7 @@
                     <div class="option-stat"><div class="option-stat-label">ATM行权价</div><div class="option-stat-value text-warning fw-bold" id="stat-atm-strike">${atmStrike || '--'}</div></div>
                     <div class="option-stat"><div class="option-stat-label">Call IV均值</div><div class="option-stat-value" id="stat-call-iv">${stats.avg_call_iv?.toFixed(1) || '--'}%</div></div>
                     <div class="option-stat"><div class="option-stat-label">Put IV均值</div><div class="option-stat-value" id="stat-put-iv">${stats.avg_put_iv?.toFixed(1) || '--'}%</div></div>
+                    <div class="option-stat"><div class="option-stat-label">导出Excel</div><div class="option-stat-value"><a href="http://47.100.97.88/api/options/export_excel" target="_blank" class="btn btn-sm btn-outline-light">📥 下载</a></div></div>
                 `;
                 
                 // ========== 以ATM为中心，向两端展开渲染 ==========

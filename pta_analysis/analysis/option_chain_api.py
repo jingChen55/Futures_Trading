@@ -1,5 +1,9 @@
 
 
+
+
+
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -1503,3 +1507,282 @@ if __name__ == '__main__':
         print(f"  IV Diff: {stats.get('iv_diff')}%")
     else:
         print(f"Error: {result.get('error')}")
+# ==================== Excel 导出 ====================
+
+def export_atm_option_excel(output_dir: str = None, trade_date: str = None) -> dict:
+    """导出平值期权上下十档的隐波、成交、持仓数据到 Excel
+    
+    Args:
+        output_dir: 输出目录，默认 ~/.hermes/option_exports/
+        trade_date: 交易日期，默认当天
+        
+    Returns:
+        {'success': True, 'filepath': '...'}
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import (Font, PatternFill, Alignment, Border, Side,
+                                  GradientFill)
+    from openpyxl.utils import get_column_letter
+    
+    if output_dir is None:
+        output_dir = os.path.expanduser("~/.hermes/option_exports")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    if trade_date is None:
+        trade_date = datetime.now().strftime("%Y%m%d")
+    
+    # 获取数据
+    api = get_option_api()
+    result = api.get_full_chain()
+    if not result.get('success'):
+        return {'success': False, 'error': result.get('error', '获取数据失败')}
+    
+    # 计算 ATM 行权价
+    underlying_price = result.get('underlying_price', 0)
+    atm_strike = round(underlying_price / 50) * 50
+    strike_rows = result.get('strike_rows', [])
+    
+    # ATM 上下各10档，镜像对称排列：ATM居中，高行权价在上，低行权价在下
+    all_strikes = sorted(set(r['strike'] for r in strike_rows))  # 低→高
+    atm_idx = None
+    for i, s in enumerate(all_strikes):
+        if abs(s - atm_strike) < 25:
+            atm_idx = i
+            break
+
+    if atm_idx is None:
+        return {'success': False, 'error': f'未找到 ATM 行权价 {atm_strike}'}
+
+    start_idx = max(0, atm_idx - 10)
+    end_idx = min(len(all_strikes), atm_idx + 11)
+    selected_strikes = all_strikes[start_idx:end_idx]  # ATM在中间，高→低（因为逆序取片段）
+    selected_strikes = list(reversed(selected_strikes))  # 翻转：让ATM在第11行，高Strike在上
+    
+    # 建立 strike -> row 映射
+    row_map = {r['strike']: r for r in strike_rows}
+    
+    # 近月信息
+    near_expiry = result.get('near_expiry', '')
+    near_expiry_display = result.get('near_expiry_display', near_expiry)
+    # sheet名不允许 / : * ? [ ] ，替换掉
+    sheet_name = re.sub(r'[/:\\*?\[\]]', '-', near_expiry_display)
+    # ---- 构建工作簿 ----
+    wb = Workbook()
+
+    # === 样式定义 ===
+    hdr_font = Font(name='微软雅黑', bold=True, color='FFFFFF', size=11)
+    hdr_fill = PatternFill("solid", fgColor="2F5496")
+    sub_fill = PatternFill("solid", fgColor="D6E4F0")
+    alt_fill = PatternFill("solid", fgColor="EBF3FB")
+    atm_fill = PatternFill("solid", fgColor="FFF2CC")
+    atm_hdr_fill = PatternFill("solid", fgColor="FFD966")
+
+    center = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    right = Alignment(horizontal='right', vertical='center')
+    left = Alignment(horizontal='left', vertical='center')
+
+    thin = Side(style='thin', color='BFBFBF')
+    medium = Side(style='medium', color='4472C4')
+    thin_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    medium_border = Border(left=medium, right=medium, top=medium, bottom=medium)
+
+    # 涨跌颜色
+    up_font = Font(name='微软雅黑', color='C00000', size=10)
+    dn_font = Font(name='微软雅黑', color='008000', size=10)
+    neu_font = Font(name='微软雅黑', color='000000', size=10)
+    bold_font = Font(name='微软雅黑', bold=True, size=10)
+    norm_font = Font(name='微软雅黑', size=10)
+
+    def chg_font(val):
+        if val is None: return neu_font
+        return up_font if val > 0 else dn_font if val < 0 else neu_font
+
+    def chg_sign(val):
+        if val is None: return '0.0%'
+        sign = '+' if val > 0 else ''
+        return f'{sign}{val:.1f}%'
+
+    def fill_font_and_align(ws, row, col, value, font, align=None):
+        cell = ws.cell(row=row, column=col, value=value)
+        cell.font = font
+        cell.alignment = align or center
+        cell.border = thin_border
+        return cell
+
+    # === Sheet: 认购+认沽合并 ===
+    ws = wb.active
+    ws.title = sheet_name
+
+    # 主标题
+    ws.merge_cells(f'A1:M1')
+    title_cell = ws['A1']
+    title_cell.value = f'PTA期权链 (ATM±10档)  {near_expiry_display}  {trade_date}'
+    title_cell.font = Font(name='微软雅黑', bold=True, size=13, color='FFFFFF')
+    title_cell.fill = PatternFill("solid", fgColor="1F4E79")
+    title_cell.alignment = center
+    ws.row_dimensions[1].height = 28
+
+    # 副标题
+    ws.merge_cells(f'A2:M2')
+    sub = ws['A2']
+    sub.value = f'标的: PTA  当前价: {underlying_price:.0f}  ATM行权价: {atm_strike:.0f}'
+    sub.font = Font(name='微软雅黑', size=10, color='595959', italic=True)
+    sub.fill = PatternFill("solid", fgColor="D9E1F2")
+    sub.alignment = center
+    ws.row_dimensions[2].height = 18
+
+    # 列标题：镜像对称排列（从行权价向两侧展开，越近越靠内）
+    # Call区（左侧6列）：持仓变化 | 持仓量 | 成交量变化 | 成交量 | IV变化 | IV
+    # Put区（右侧6列）：IV | IV变化 | 成交量 | 成交量变化 | 持仓量 | 持仓变化
+    col_headers = [
+        'Call持仓变化', 'Call持仓量', 'Call成交量变化', 'Call成交量', 'Call-IV变化(%)', 'Call-IV(%)',
+        '行权价',
+        'Put-IV(%)', 'Put-IV变化(%)', 'Put成交量', 'Put成交量变化', 'Put持仓量', 'Put持仓变化'
+    ]
+
+    # Call区 header（绿色）
+    hdr_call_fill = PatternFill("solid", fgColor="375623")
+    for ci, h in enumerate(col_headers[:6], 1):
+        c = ws.cell(row=3, column=ci, value=h)
+        c.font = hdr_font
+        c.fill = hdr_call_fill
+        c.alignment = center
+        c.border = thin_border
+
+    # 行权价列（ATM高亮）
+    c_strike = ws.cell(row=3, column=7, value='行权价')
+    c_strike.font = Font(name='微软雅黑', bold=True, color='FFFFFF', size=11)
+    c_strike.fill = PatternFill("solid", fgColor="2F5496")
+    c_strike.alignment = center
+    c_strike.border = thin_border
+
+    # Put区 header（蓝色）
+    hdr_put_fill = PatternFill("solid", fgColor="1F3864")
+    for ci, h in enumerate(col_headers[7:], 8):
+        c = ws.cell(row=3, column=ci, value=h)
+        c.font = hdr_font
+        c.fill = hdr_put_fill
+        c.alignment = center
+        c.border = thin_border
+
+    ws.row_dimensions[3].height = 22
+
+    norm_font = Font(name='微软雅黑', size=10)
+    bold_font = Font(name='微软雅黑', bold=True, size=10)
+    call_fill_even = PatternFill("solid", fgColor="E2EFDA")
+    call_fill_odd = PatternFill("solid", fgColor="EBF3E8")
+    put_fill_even = PatternFill("solid", fgColor="D6E4F0")
+    put_fill_odd = PatternFill("solid", fgColor="EBF3FB")
+    atm_fill = PatternFill("solid", fgColor="FFF2CC")
+    atm_strike_fill = PatternFill("solid", fgColor="FFD966")
+    white_fill = PatternFill("solid", fgColor="FFFFFF")
+
+    up_font = Font(name='微软雅黑', color='C00000', size=10)
+    dn_font = Font(name='微软雅黑', color='008000', size=10)
+    neu_font = Font(name='微软雅黑', color='000000', size=10)
+
+    def chg_color(val):
+        if val is None: return neu_font
+        return up_font if val > 0 else dn_font if val < 0 else neu_font
+
+    for ri, strike in enumerate(selected_strikes):
+        r = row_map.get(strike)
+        if not r:
+            continue
+        excel_row = ri + 4
+        is_atm = abs(strike - atm_strike) < 25
+        bg_c = atm_fill if is_atm else (call_fill_even if ri % 2 == 0 else call_fill_odd)
+        bg_p = atm_fill if is_atm else (put_fill_even if ri % 2 == 0 else put_fill_odd)
+        bg_s = atm_strike_fill if is_atm else PatternFill("solid", fgColor="D9E1F2")
+
+        # Call 6列（从外向内：持仓变化→持仓量→成交量变化→成交量→IV变化→IV）
+        call_vals = [
+            r.get('call_oi_change'),
+            r.get('call_oi'),
+            r.get('call_volume_change'),
+            r.get('call_volume'),
+            r.get('call_iv_change'),
+            r.get('call_iv'),
+        ]
+        # Put 6列（从左向右：IV→IV变化→成交量→成交量变化→持仓量→持仓变化）
+        put_vals = [
+            r.get('put_iv'),
+            r.get('put_iv_change'),
+            r.get('put_volume'),
+            r.get('put_volume_change'),
+            r.get('put_oi'),
+            r.get('put_oi_change'),
+        ]
+
+        # Call 6列
+        for ci, val in enumerate(call_vals, 1):
+            cell = ws.cell(row=excel_row, column=ci, value=val)
+            cell.fill = bg_c
+            cell.alignment = center
+            cell.border = thin_border
+            # ci=1持仓变化/ci=3成交量变化/ci=5IV变化 用颜色
+            if ci in (1, 3, 5):
+                cell.font = chg_color(val)
+                if val is not None:
+                    cell.number_format = '+0.0%;-0.0%'
+            elif ci in (2, 4):
+                cell.font = norm_font
+                if val is not None:
+                    cell.number_format = '#,##0'
+            elif ci == 6:
+                cell.font = norm_font
+                if val is not None:
+                    cell.number_format = '0.0'
+
+        # 行权价
+        cell_s = ws.cell(row=excel_row, column=7, value=strike)
+        cell_s.fill = bg_s
+        cell_s.alignment = center
+        cell_s.border = thin_border
+        cell_s.font = bold_font
+
+        # Put 6列
+        for ci, val in enumerate(put_vals, 8):
+            cell = ws.cell(row=excel_row, column=ci, value=val)
+            cell.fill = bg_p
+            cell.alignment = center
+            cell.border = thin_border
+            # Put: ci=8IV/ci=9IV变化/ci=10成交量/ci=11成交量变化/ci=12持仓量/ci=13持仓变化
+            if ci == 8:
+                cell.font = norm_font
+                if val is not None:
+                    cell.number_format = '0.0'
+            elif ci == 9:
+                cell.font = chg_color(val)
+                if val is not None:
+                    cell.number_format = '+0.0%;-0.0%'
+            elif ci == 10:
+                cell.font = norm_font
+                if val is not None:
+                    cell.number_format = '#,##0'
+            elif ci == 11:
+                cell.font = chg_color(val)
+                if val is not None:
+                    cell.number_format = '+0.0%;-0.0%'
+            elif ci == 12:
+                cell.font = norm_font
+                if val is not None:
+                    cell.number_format = '#,##0'
+            elif ci == 13:
+                cell.font = chg_color(val)
+                if val is not None:
+                    cell.number_format = '+0.0%;-0.0%'
+
+        ws.row_dimensions[excel_row].height = 18
+
+    col_widths = [14, 12, 14, 12, 14, 12, 12, 12, 14, 12, 14, 12, 14]
+    for ci, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(ci)].width = w
+
+    ws.freeze_panes = 'A4'
+
+    filename = f'PTA_option_chain_{near_expiry}_{trade_date}.xlsx'
+    filepath = os.path.join(output_dir, filename)
+    wb.save(filepath)
+    
+    return {'success': True, 'filepath': filepath, 'filename': filename}
