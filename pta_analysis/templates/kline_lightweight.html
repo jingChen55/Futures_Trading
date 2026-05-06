@@ -538,6 +538,17 @@
         </div>
     </div>
 
+    <!-- 市场日报及策略建议 -->
+    <div class="option-section" id="daily-report-section">
+        <div class="section-title">
+            <span>📰 市场日报及策略建议 <span id="reportTime" style="color:#888;font-size:11px;"></span></span>
+            <button onclick="loadDailyReport()" style="background:#e65100;color:#fff;border:none;padding:2px 8px;border-radius:4px;cursor:pointer;">刷新</button>
+        </div>
+        <div id="dailyReportContent" style="padding:10px;background:#252538;border-radius:0 0 8px 8px;max-height:600px;overflow-y:auto;">
+            <div id="reportLoading" style="color:#888;text-align:center;padding:20px;">加载中...</div>
+        </div>
+    </div>
+
     <script>
         // ==================== 全局变量 ====================
         let mainChart = null, macdChart = null, kdjChart = null;
@@ -844,7 +855,7 @@
                     _syncingSub = false;
                 }
                 // 滚动后重绘MACD标注
-                if (lastMacdWaveData.times.length > 0) {
+                if (lastMacdWaveData && lastMacdWaveData.times.length > 0) {
                     drawMacdWaveLabels(lastMacdWaveData.times, lastMacdWaveData.waveEndLabels);
                 }
             });
@@ -2600,94 +2611,317 @@
                 const brent = up.brent || {};
                 const px = up.px || {};
                 const naphtha = up.naphtha || {};
+                const pxnData = up.pxn || {};
 
                 // PTA自身
                 const pta = d.pta || {};
                 const spot = pta.spot || {};
-                const fut = pta.futures || {};
+                const fut = pta.future || {};
 
                 // 成本
                 const cost = d.cost || {};
                 const ptaCost = cost.pta_cost || {};
-
-                // 开工率
-                const poly = d.polyester || {};
-                const ptaOp = d.pta_operating || {};
-
-                // 库存
-                const inv = d.inventory || {};
+                const profit = cost.profit || {};
+                const pxn = cost.pxn_spread || {};
 
                 // ===== 统计卡片 =====
+                const profitColor = profit.profit > 0 ? '#26a69a' : '#ef5350';
+                const profitSign = profit.profit > 0 ? '+' : '';
                 document.getElementById('fundamentalStats').innerHTML = `
                     <div class="option-stat">
                         <div class="option-stat-label">布伦特原油</div>
                         <div class="option-stat-value" style="color:${brent.change_pct>0?'#26a69a':'#ef5350'}">${brent.price ? '$'+brent.price.toFixed(2) : '--'}</div>
                     </div>
                     <div class="option-stat">
-                        <div class="option-stat-label">PX现货</div>
-                        <div class="option-stat-value">${px.price ? px.price.toFixed(0)+' USD' : '--'}</div>
+                        <div class="option-stat-label">PX现货(CNY)</div>
+                        <div class="option-stat-value">${px.spot_price ? '¥'+px.spot_price.toFixed(0) : '--'}</div>
                     </div>
                     <div class="option-stat">
                         <div class="option-stat-label">PTA成本</div>
-                        <div class="option-stat-value">${ptaCost.cost_mid ? ptaCost.cost_mid.toFixed(0) : '--'}</div>
+                        <div class="option-stat-value">${ptaCost.pta_cost ? '¥'+ptaCost.pta_cost.toFixed(0) : '--'}</div>
                     </div>
                     <div class="option-stat">
                         <div class="option-stat-label">PTA现货</div>
-                        <div class="option-stat-value">${spot.price ? spot.price.toFixed(0) : '--'}</div>
+                        <div class="option-stat-value">${spot.price ? '¥'+spot.price.toFixed(0) : '--'}</div>
                     </div>
                     <div class="option-stat">
-                        <div class="option-stat-label">聚酯开工</div>
-                        <div class="option-stat-value">${poly.operating_rate ? poly.operating_rate+'%' : '--'}</div>
+                        <div class="option-stat-label">加工利润</div>
+                        <div class="option-stat-value" style="color:${profitColor}">${profit.profit ? profitSign+'¥'+profit.profit.toFixed(0) : '--'}</div>
                     </div>
                     <div class="option-stat">
-                        <div class="option-stat-label">PTA开工</div>
-                        <div class="option-stat-value">${ptaOp.rate ? ptaOp.rate+'%' : '--'}</div>
+                        <div class="option-stat-label">PXN</div>
+                        <div class="option-stat-value">${pxnData.spread_usd ? '$'+pxnData.spread_usd.toFixed(0) : '--'}</div>
                     </div>
                 `;
 
                 // ===== 详细信息文本 =====
                 const brentChange = brent.change_pct ? (brent.change_pct > 0 ? '+'+brent.change_pct.toFixed(2)+'%' : brent.change_pct.toFixed(2)+'%') : '--';
-                const ptaChange = spot.change_pct ? (spot.change_pct > 0 ? '+'+spot.change_pct.toFixed(2)+'%' : spot.change_pct.toFixed(2)+'%') : '--';
-                const costRange = ptaCost.cost_low && ptaCost.cost_high ? ptaCost.cost_low.toFixed(0)+' - '+ptaCost.cost_high.toFixed(0) : '--';
-                const spotTime = spot.date || '--';
+                const futSymbol = fut.symbol || '--';
+                const futSettle = fut.settle ? '¥'+fut.settle.toFixed(0) : '--';
+                const futChg = fut.change_pct ? (fut.change_pct > 0 ? '+'+fut.change_pct.toFixed(2)+'%' : fut.change_pct.toFixed(2)+'%') : '--';
+                const basisVal = pta.basis ? pta.basis.value : null;
+                const basisStr = basisVal !== null ? (basisVal > 0 ? '+¥'+basisVal.toFixed(0) : '¥'+basisVal.toFixed(0)) : '--';
                 const pxTime = px.date || '--';
-                const inventoryNote = inv.note || (inv.total ? '总库存: '+inv.total+'万吨' : '暂无库存数据');
-                const polyNote = poly.description || '';
-                const ptaOpNote = ptaOp.description || '';
+                const naphthaUsd = naphtha.price ? '$'+naphtha.price.toFixed(2) : '--';
 
                 document.getElementById('fundamentalDetail').innerHTML = `
                     <div style="margin-bottom:8px;">
                         <strong style="color:#888;">🔗 产业链</strong>：
-                        原油(${brent.price?'$'+brent.price.toFixed(2):'--'}) → PX(${px.price?px.price.toFixed(0)+' USD':'--'}) → PTA(现货${spot.price?spot.price.toFixed(0):'--'},期货${fut.price?fut.price.toFixed(0):'--'})
+                        布伦特(${brent.price?'$'+brent.price.toFixed(2):'--'}${brentChange}) → 石脑油(${naphthaUsd}) → PX(${px.spot_price?'¥'+px.spot_price.toFixed(0):'--'}) → PTA(现货${spot.price?'¥'+spot.price.toFixed(0):'--'},期货${futSymbol}${futSettle})
                     </div>
                     <div style="margin-bottom:8px;">
                         <strong style="color:#888;">📊 成本利润</strong>：
-                        PTA成本区间 <span style="color:#ffd700">${costRange}</span>，
-                        现货价格 <span style="color:${spot.price && ptaCost.cost_mid && spot.price > ptaCost.cost_mid ? '#26a69a':'#ef5350'}">${spot.price?spot.price.toFixed(0):'--'}</span>，
-                        ${spot.price && ptaCost.cost_mid ? (spot.price - ptaCost.cost_mid > 0 ? '利润':'亏损')+' '+Math.abs(spot.price - ptaCost.cost_mid).toFixed(0)+'元' : ''}
+                        PTA成本 <span style="color:#ffd700">¥${ptaCost.pta_cost?ptaCost.pta_cost.toFixed(0):'--'}</span>，
+                        加工利润 <span style="color:${profitColor}">${profit.profit?profitSign+'¥'+profit.profit.toFixed(0):'--'}(${(profit.profit_pct!=null)?profitSign+profit.profit_pct.toFixed(1)+'%':'--'})</span>
+                    </div>
+                    <div style="margin-bottom:8px;">
+                        <strong style="color:#888;">📐 基差/PXN</strong>：
+                        基差=${basisStr}(${pta.basis?pta.basis.premium:'--'}) | PXN=${pxnData.spread_usd?'$'+pxnData.spread_usd.toFixed(0):'--'}(${pxnData.level?'水平'+pxnData.level:'--'})
                     </div>
                     <div style="margin-bottom:8px;">
                         <strong style="color:#888;">📅 数据时间</strong>：
-                        现货@${spotTime} | PX@${pxTime} | 更新于 ${result.timestamp || '--'}
-                    </div>
-                    <div style="margin-bottom:8px;">
-                        <strong style="color:#888;">🏭 开工率</strong>：
-                        ${ptaOpNote} ${ptaOp.rate?'PTA '+ptaOp.rate+'%':''} | ${polyNote} ${poly.operating_rate?'聚酯 '+poly.operating_rate+'%':''}
-                    </div>
-                    <div style="margin-bottom:8px;">
-                        <strong style="color:#888;">📦 库存</strong>：${inventoryNote}
+                        现货@${spot.date||'--'} | PX@${pxTime} | 期货@${futSymbol} | 更新于 ${result.timestamp || '--'}
                     </div>
                     <div style="color:#666;font-size:11px;margin-top:5px;">
-                        数据来源: 通达信/akshare实时数据 | ⚠️基本面信息仅供参考，不构成交易建议
+                        数据来源: 郑商所每日现货 · 隆众资讯 · 新浪财经 | ⚠️基本面信息仅供参考，不构成交易建议
                     </div>
                 `;
+
+                // ===== AI产业点评 =====
+                const commentary = d.ai_commentary || '';
+                const commentaryTimeEl = document.getElementById('commentaryTime');
+                const commentaryEl = document.getElementById('aiCommentary');
+                if (commentaryTimeEl) commentaryTimeEl.textContent = result.timestamp ? '  ' + result.timestamp : '';
+                if (!commentaryEl) return;
+                if (commentary) {
+                    // 高亮评级文字
+                    const ratingMatch = commentary.match(/\*\*([^*]+)\*\*/);
+                    let displayText = commentary.replace(/\*\*/g, '');
+                    commentaryEl.innerHTML = '';
+                    if (ratingMatch) {
+                        const rating = ratingMatch[1];
+                        const parts = commentary.split('**');
+                        parts.forEach(p => {
+                            if (p === rating) {
+                                const color = rating.includes('多') ? '#26a69a' : rating.includes('空') ? '#ef5350' : '#ffd700';
+                                const span = document.createElement('span');
+                                span.style.color = color;
+                                span.style.fontWeight = 'bold';
+                                span.textContent = '【' + rating + '】';
+                                commentaryEl.appendChild(span);
+                            } else {
+                                commentaryEl.appendChild(document.createTextNode(p));
+                            }
+                        });
+                    } else {
+                        commentaryEl.textContent = commentary;
+                    }
+                } else {
+                    commentaryEl.textContent = '暂无AI点评';
+                    commentaryEl.style.color = '#888';
+                }
             } catch(e) {
                 document.getElementById('fundamentalStats').innerHTML = '<div style="color:#888;text-align:center;padding:20px;">基本面数据暂不可用</div>';
                 document.getElementById('fundamentalDetail').innerHTML = '<div style="color:#888;text-align:center;">请稍后刷新重试</div>';
                 console.error('loadFundamental error:', e);
             }
         }
-        
+
+        // ==================== 市场日报及策略建议 ====================
+        async function loadDailyReport() {
+            try {
+                const res = await fetch('/api/daily_report');
+                const result = await res.json();
+                if (!result.success) {
+                    document.getElementById('dailyReportContent').innerHTML =
+                        '<div style="color:#888;text-align:center;padding:20px;">日报暂不可用: ' + (result.error || '') + '</div>';
+                    return;
+                }
+                const d = result.data || {};
+                document.getElementById('reportTime').textContent = result.data.timestamp ? '  ' + result.data.timestamp : '';
+
+                let html = '';
+
+                // ===== 一、期权数据解读 =====
+                const s1 = d.section1 || {};
+                html += `<div style="margin-bottom:16px;">
+                    <div style="color:#ffd700;font-size:13px;font-weight:bold;margin-bottom:8px;">${s1.title || '一、期权数据解读'}</div>
+                    <div style="color:#aaa;font-size:11px;margin-bottom:6px;">${s1.subtitle || ''}</div>
+                    <div style="color:#888;font-size:11px;margin-bottom:10px;">${s1.summary || ''}</div>`;
+
+                // 期权持仓变化表格
+                const highlights = s1.highlights || [];
+                if (highlights.length > 0) {
+                    html += `<div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:11px;color:#ddd;min-width:500px;">
+                        <thead>
+                            <tr style="background:#333;">
+                                <th style="padding:4px 6px;text-align:left;">行权价</th>
+                                <th style="padding:4px 6px;text-align:right;">持仓变化</th>
+                                <th style="padding:4px 6px;text-align:right;">隐波</th>
+                                <th style="padding:4px 6px;text-align:left;">信号</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+                    highlights.forEach(h => {
+                        const typeColor = h.type === 'P' ? '#ef5350' : '#26a69a';
+                        const signalColor = h.signal.includes('底') || h.signal.includes('支撑') ? '#ffd700' :
+                                           h.signal.includes('压') ? '#ef5350' : '#aaa';
+                        html += `<tr style="border-bottom:1px solid #333;">
+                            <td style="padding:4px 6px;"><span style="color:${typeColor};font-weight:bold;">${h.type}</span> ${h.strike}</td>
+                            <td style="padding:4px 6px;text-align:right;color:#ffd700;">${h.change}</td>
+                            <td style="padding:4px 6px;text-align:right;">${h.iv || '--'}</td>
+                            <td style="padding:4px 6px;color:${signalColor};">${h.signal}</td>
+                        </tr>`;
+                    });
+                    html += `</tbody></table></div>`;
+                }
+
+                // 结论
+                const conclusions = s1.conclusions || [];
+                if (conclusions.length > 0) {
+                    html += `<div style="margin-top:8px;color:#ccc;font-size:11px;line-height:1.8;">`;
+                    conclusions.forEach(c => {
+                        html += `<div style="margin-bottom:2px;">${c}</div>`;
+                    });
+                    html += `</div>`;
+                }
+                html += `</div>`;
+
+                // ===== 二、宏观与基本面 =====
+                const s2 = d.section2 || {};
+                html += `<div style="margin-bottom:16px;">
+                    <div style="color:#ffd700;font-size:13px;font-weight:bold;margin-bottom:8px;">${s2.title || '二、宏观与基本面'}</div>
+                    <div style="color:#aaa;font-size:11px;margin-bottom:6px;">${s2.subtitle || ''}</div>`;
+
+                // 原油
+                const oil = s2.oil || d.crude || {};
+                if (oil.title || oil.signal) {
+                    html += `<div style="margin-bottom:8px;">
+                        <div style="color:#888;font-size:11px;margin-bottom:4px;">${oil.title || '🛢️ 原油市场'}</div>
+                        <div style="display:flex;gap:12px;flex-wrap:wrap;">`;
+                    if (oil.wti) html += `<span style="color:#ccc;font-size:11px;">WTI: <span style="color:${(oil.wti.change||0)>=0?'#26a69a':'#ef5350'};">$${oil.wti.price || '--'} ${oil.wti.change || ''}</span></span>`;
+                    if (oil.brent) html += `<span style="color:#ccc;font-size:11px;">布伦特: <span style="color:${(oil.brent.change||0)>=0?'#26a69a':'#ef5350'};">$${oil.brent.price || '--'} ${oil.brent.change || ''}</span></span>`;
+                    if (oil.signal) html += `<span style="color:#ffd700;font-size:11px;">${oil.signal}</span>`;
+                    html += `</div></div>`;
+                }
+
+                // 宏观/地缘/产业快讯
+                const macroNews = d.macro_news || {};
+                const geoNews = macroNews.geo || [];
+                const industryNews = macroNews.industry || [];
+                const macroItems = macroNews.macro || [];
+                const allNews = [...geoNews.slice(0, 2), ...industryNews.slice(0, 1), ...macroItems.slice(0, 1)].filter(n => n && n.length > 10);
+                if (allNews.length > 0) {
+                    html += `<div style="margin-bottom:8px;">
+                        <div style="color:#888;font-size:11px;margin-bottom:4px;">🌍 地缘/宏观/产业快讯</div>`;
+                    allNews.forEach(n => {
+                        const short = n.length > 100 ? n.substring(0, 100) + '...' : n;
+                        html += `<div style="color:#999;font-size:10px;line-height:1.5;margin-bottom:3px;">· ${short}</div>`;
+                    });
+                    html += `</div>`;
+                }
+
+                // 产业链开工率
+                const rates = d.industry_rates || {};
+                const rateData = rates.data || {};
+                const rateItems = Object.values(rateData).filter(r => r && r.name);
+                if (rateItems.length > 0) {
+                    html += `<div style="margin-bottom:8px;">
+                        <div style="color:#888;font-size:11px;margin-bottom:4px;">🏭 产业链开工率</div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;">`;
+                    rateItems.forEach(r => {
+                        const val = r.value;
+                        const color = val === null ? '#666' : (val > 70 ? '#26a69a' : val < 50 ? '#ef5350' : '#ffd700');
+                        html += `<span style="font-size:11px;color:#ccc;">${r.name}: <span style="color:${color};font-weight:bold;">${val !== null ? val+'%' : '需订阅'}</span></span>`;
+                    });
+                    html += `</div></div>`;
+                }
+
+                // 库存
+                const inv = d.inventory || s2.inventory || {};
+                const invItems = [];
+                // MEG库存: {stock, change, date}
+                if (inv.meg) {
+                    const meg = typeof inv.meg === 'object' ? inv.meg : {stock: inv.meg};
+                    invItems.push(`MEG: ${meg.stock || meg}吨${meg.change !== undefined ? ' (' + (meg.change >= 0 ? '+' : '') + meg.change + ')' : ''}`);
+                }
+                // 苯乙烯
+                if (inv.sm) {
+                    const sm = typeof inv.sm === 'object' ? inv.sm : {stock: inv.sm};
+                    invItems.push(`苯乙烯: ${sm.stock || sm}吨${sm.change !== undefined ? ' (' + (sm.change >= 0 ? '+' : '') + sm.change + ')' : ''}`);
+                }
+                // PTA库存
+                if (inv.pta !== null && inv.pta !== undefined) {
+                    invItems.push(`PTA库存: ${inv.pta}`);
+                }
+                if (invItems.length > 0) {
+                    html += `<div style="margin-bottom:8px;">
+                        <div style="color:#888;font-size:11px;margin-bottom:4px;">📦 库存</div>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;">`;
+                    invItems.forEach(item => {
+                        html += `<span style="font-size:11px;color:#ccc;">${item}</span>`;
+                    });
+                    html += `</div></div>`;
+                }
+
+                // PTA产业评估
+                const ptaInd = s2.pta || {};
+                if (ptaInd.assessment) {
+                    html += `<div style="margin-bottom:8px;">
+                        <div style="color:#888;font-size:11px;margin-bottom:4px;">${ptaInd.title || '📦 PTA产业'}</div>
+                        <div style="color:#aaa;font-size:11px;line-height:1.5;">${ptaInd.assessment}</div>
+                    </div>`;
+                }
+
+                // 成本区间
+                const costRange = d.cost_range || d.cost || {};
+                if (costRange.low && costRange.high) {
+                    html += `<div style="margin-bottom:8px;color:#888;font-size:11px;">
+                        📐 成本区间: <span style="color:#ffd700;">¥${costRange.low} ~ ¥${costRange.high}</span>
+                    </div>`;
+                }
+
+                html += `</div>`;
+
+                // ===== 三、卖方策略建议 =====
+                const s3 = d.section3 || {};
+                html += `<div style="margin-bottom:16px;">
+                    <div style="color:#ffd700;font-size:13px;font-weight:bold;margin-bottom:8px;">${s3.title || '三、卖方策略建议'}</div>
+                    <div style="color:#aaa;font-size:11px;margin-bottom:6px;">${s3.subtitle || ''}</div>`;
+
+                const strategies = s3.strategies || [];
+                if (strategies.length > 0) {
+                    strategies.forEach(s => {
+                        html += `<div style="margin-bottom:8px;padding:8px;background:#1a1a28;border-radius:4px;">
+                            <div style="color:#ffd700;font-size:11px;font-weight:bold;margin-bottom:3px;">${s.action || ''}</div>
+                            <div style="color:#999;font-size:10px;margin-bottom:3px;">${s.detail || ''}</div>
+                            <div style="color:#26a69a;font-size:10px;">→ ${s.suggestion || ''}</div>
+                        </div>`;
+                    });
+                }
+
+                if (s3.core_idea) {
+                    html += `<div style="margin-top:8px;padding:8px;background:#1e1e30;border-left:3px solid #ffd700;color:#ccc;font-size:11px;line-height:1.6;">
+                        <strong style="color:#ffd700;">💡 核心思路：</strong>${s3.core_idea}
+                    </div>`;
+                }
+                html += `</div>`;
+
+                // ===== 底部时间戳 =====
+                html += `<div style="color:#555;font-size:10px;text-align:center;margin-top:10px;padding-top:8px;border-top:1px solid #333;">
+                    数据来源: 郑商所 · 隆众资讯 · 新浪财经 · SHMET | ⚠️ 仅供参考，不构成交易建议
+                </div>`;
+
+                document.getElementById('dailyReportContent').innerHTML = html;
+
+            } catch(e) {
+                document.getElementById('dailyReportContent').innerHTML =
+                    '<div style="color:#888;text-align:center;padding:20px;">日报加载失败: ' + e.message + '</div>';
+                console.error('loadDailyReport error:', e);
+            }
+        }
+
         async function loadOptionChain() {
             try {
                 // 先加载期权链数据（核心数据）
@@ -3206,6 +3440,7 @@
             });
             loadOptionChain();
             loadFundamental();
+            loadDailyReport();
             // TA606价格每分钟轮询
             setInterval(pollTa606Price, 60000);
             // 每10秒增量刷新K线

@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -249,6 +250,38 @@ def api_fundamental():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/fundamental_analysis')
+def api_fundamental_analysis():
+    """PTA基本面分析（期权/宏观/策略）"""
+    try:
+        json_path = os.path.join(WORKSPACE, 'data', 'fundamental', 'analysis.json')
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return jsonify({'success': True, 'data': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/daily_report')
+def api_daily_report():
+    """PTA市场日报（新版综合分析）"""
+    try:
+        json_path = os.path.join(WORKSPACE, 'data', 'fundamental', 'daily_report.json')
+        if os.path.exists(json_path):
+            # 读取已有的日报数据
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return jsonify({'success': True, 'data': data})
+        else:
+            # 如果没有日报数据，尝试生成
+            from scripts.generate_daily_report import generate_report, save_report
+            report = generate_report()
+            save_report(report)
+            return jsonify({'success': True, 'data': report})
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)})
+
 # 注册期权链页面路由
 @app.route('/option_chain')
 def option_chain_page():
@@ -353,7 +386,8 @@ def _add_kline_changes(data):
 def _get_yesterday_close_tqsdk(symbol='CZCE.TA609'):
     """通过TqSdk获取昨日收盘价（用于计算涨跌）"""
     try:
-        api = TqApi(auth=TqAuth(TQS_USER, TQS_PASS))
+        # 加10秒超时避免卡死
+        api = TqApi(auth=TqAuth(TQS_USER, TQS_PASS), timeout=10)
         # 获取2根日K线，取倒数第2根的收盘价作为昨日收盘价
         daily_klines = api.get_kline_serial(symbol, 86400, data_length=10)
         api.close()
@@ -422,7 +456,8 @@ def api_kline_data():
     
     # ==================== TqSdk 分支 ====================
     try:
-        api = TqApi(auth=TqAuth(TQS_USER, TQS_PASS))
+        # 给 TqSdk 加10秒超时，避免网络问题时卡死
+        api = TqApi(auth=TqAuth(TQS_USER, TQS_PASS), timeout=10)
         klines = api.get_kline_serial(tqsdk_symbol, period_sec, count)
         
         # 获取昨日收盘价（用于计算涨跌）
